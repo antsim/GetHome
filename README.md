@@ -71,6 +71,29 @@ Jos ajastin pysäytetään Toggl-sovelluksessa, muutos näkyy enintään neljän
 minuutin viiveellä. Tämä johtuu Toggl API:n pyyntörajoista (30 pyyntöä
 tunnissa). Tämän sovelluksen kautta tehdyt muutokset näkyvät heti.
 
+## Vianetsintä
+
+**`failed to run 'cargo metadata' … No such file or directory`**
+Rust puuttuu tai `cargo` ei ole PATHissa. Asenna Rust ja lataa ympäristö:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+cargo --version
+```
+
+Varmista myös, että Xcode Command Line Tools on asennettu (`xcode-select --install`).
+
+**`npm warn allow-scripts …`**
+Uudet npm-versiot eivät aja pakettien asennusskriptejä ilman hyväksyntää.
+Varoitus ei yleensä estä kehitystä. Jos build valittaa esbuildista, hyväksy
+sen skripti ja asenna uudelleen:
+
+```bash
+npm approve-scripts esbuild
+npm install
+```
+
 ## Kehitys
 
 ```bash
