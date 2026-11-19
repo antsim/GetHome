@@ -1,0 +1,54 @@
+<main class="card" [attr.data-tone]="view()?.tone ?? 'idle'" data-tauri-drag-region>
+  @if (view(); as v) {
+    <div class="row" data-tauri-drag-region>
+      <div class="time" data-tauri-drag-region aria-live="off">{{ v.time }}</div>
+      <button
+        type="button"
+        class="control"
+        [disabled]="pending() || !v.canControl"
+        [attr.aria-label]="v.running ? 'Pysäytä ajastin' : 'Jatka työtä'"
+        [title]="v.running ? 'Pysäytä ajastin' : 'Jatka työtä'"
+        (click)="toggleTimer()"
+      >
+        {{ v.running ? '⏸' : '▶' }}
+      </button>
+    </div>
+
+    <p class="status" data-tauri-drag-region>
+      <strong data-tauri-drag-region>{{ v.label }}</strong>
+      @if (v.detail) {
+        <span data-tauri-drag-region> · {{ v.detail }}</span>
+      }
+    </p>
+
+    <div
+      class="progress"
+      role="progressbar"
+      aria-label="Tehty työaika"
+      [attr.aria-valuenow]="Math.round(v.progress * 100)"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      data-tauri-drag-region
+    >
+      <div class="progress-fill" [style.width.%]="v.progress * 100"></div>
+    </div>
+
+    @if (error() ?? v.warning; as message) {
+      <button type="button" class="warning" title="Avaa asetukset" (click)="openSettings()">
+        ⚠ {{ message }}
+      </button>
+    }
+  } @else {
+    <p class="status" data-tauri-drag-region>Ladataan…</p>
+  }
+
+  <button
+    type="button"
+    class="settings"
+    aria-label="Asetukset"
+    title="Asetukset"
+    (click)="openSettings()"
+  >
+    ⚙
+  </button>
+</main>

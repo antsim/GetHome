@@ -1,0 +1,145 @@
+:host {
+  display: block;
+  height: 100vh;
+  overflow-y: auto;
+  background: rgb(var(--surface-rgb));
+  color: rgb(var(--text-rgb));
+}
+
+.settings {
+  padding: 20px 24px 28px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+section {
+  padding: 14px 0;
+  border-bottom: 1px solid rgb(var(--border-rgb) / 0.35);
+}
+
+.hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: rgb(var(--muted-rgb));
+}
+
+input:not([type='checkbox'], [type='range']) {
+  box-sizing: border-box;
+  padding: 5px 8px;
+  font: inherit;
+  color: inherit;
+  background: rgb(var(--surface-rgb));
+  border: 1px solid rgb(var(--border-rgb) / 0.7);
+  border-radius: 6px;
+
+  &.invalid {
+    border-color: rgb(var(--danger-rgb));
+  }
+}
+
+input[type='range'] {
+  width: 100%;
+}
+
+button {
+  padding: 5px 12px;
+  font: inherit;
+  color: inherit;
+  background: rgb(var(--muted-rgb) / 0.15);
+  border: 1px solid rgb(var(--border-rgb) / 0.6);
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  &.primary {
+    color: white;
+    background: rgb(var(--accent-rgb));
+    border-color: transparent;
+  }
+
+  &.danger {
+    color: rgb(var(--danger-rgb));
+  }
+}
+
+.token-row {
+  display: flex;
+  gap: 8px;
+
+  input {
+    flex: 1;
+  }
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--overtime-rgb));
+}
+
+.targets {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 6px 12px;
+  align-items: center;
+  max-width: 260px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.range {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.feedback {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: rgb(var(--overtime-rgb));
+
+  &.error {
+    color: rgb(var(--danger-rgb));
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

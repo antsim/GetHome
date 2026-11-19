@@ -1,0 +1,146 @@
+:host {
+  --surface-alpha: 1;
+  display: block;
+  height: 100vh;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.card {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--border-rgb) / 0.35);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  color: rgb(var(--text-rgb));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.time {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.status {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(var(--muted-rgb));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  strong {
+    color: rgb(var(--text-rgb));
+  }
+}
+
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(var(--muted-rgb) / 0.25);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: rgb(var(--accent-rgb));
+  transition: width 0.5s linear;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.control {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb) / 0.15);
+  color: rgb(var(--accent-rgb));
+  font-size: 15px;
+
+  &:hover:not(:disabled) {
+    background: rgb(var(--accent-rgb) / 0.28);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.warning {
+  padding: 0;
+  text-align: left;
+  font-size: 11px;
+  color: rgb(var(--warning-rgb));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 13px;
+  color: rgb(var(--muted-rgb));
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card:hover .settings,
+.settings:focus-visible {
+  opacity: 1;
+}
+
+// Break: frozen, greyed-out time and a clearly visible "Tauolla".
+.card[data-tone='break'] {
+  .time {
+    color: rgb(var(--muted-rgb));
+  }
+
+  .status strong {
+    color: rgb(var(--break-rgb));
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .progress-fill {
+    background: rgb(var(--muted-rgb));
+  }
+}
+
+.card[data-tone='overtime'] {
+  .time,
+  .status strong {
+    color: rgb(var(--overtime-rgb));
+  }
+
+  .progress-fill {
+    background: rgb(var(--overtime-rgb));
+  }
+}

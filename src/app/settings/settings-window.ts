@@ -1,0 +1,193 @@
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import {
+  AbstractControl,
+  FormControl,
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
+
+import { formatMinutes, parseMinutes } from '../core/format';
+import {
+  MAX_OPACITY,
+  MIN_OPACITY,
+  type AccountInfo,
+  type Settings,
+  type SettingsView,
+} from '../core/models';
+import { TauriCommands, toAppError } from '../core/tauri-commands';
+import { isTauri } from '../core/tauri-env';
+
+export const WEEKDAYS = [
+  'Maanantai',
+  'Tiistai',
+  'Keskiviikko',
+  'Torstai',
+  'Perjantai',
+  'Lauantai',
+  'Sunnuntai',
+] as const;
+
+interface Feedback {
+  kind: 'success' | 'error';
+  text: string;
+}
+
+function durationValidator(control: AbstractControl<string>): ValidationErrors | null {
+  return parseMinutes(control.value) === null ? { duration: true } : null;
+}
+
+/** Settings window: API token, daily targets and display options. */
+@Component({
+  selector: 'app-settings-window',
+  imports: [ReactiveFormsModule],
+  templateUrl: './settings-window.html',
+  styleUrl: './settings-window.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class SettingsWindow implements OnInit {
+  private readonly commands = inject(TauriCommands);
+  private readonly fb = inject(NonNullableFormBuilder);
+
+  protected readonly weekdays = WEEKDAYS;
+  protected readonly minOpacity = MIN_OPACITY;
+  protected readonly maxOpacity = MAX_OPACITY;
+
+  protected readonly tokenControl = new FormControl('', { nonNullable: true });
+  protected readonly form = this.fb.group({
+    dailyTargets: this.fb.array(
+      WEEKDAYS.map(() => this.fb.control('7:30', [Validators.required, durationValidator])),
+    ),
+    useSystemTimezone: this.fb.control(true),
+    timezone: this.fb.control(''),
+    showSeconds: this.fb.control(true),
+    autostart: this.fb.control(false),
+    windowOpacity: this.fb.control(MAX_OPACITY),
+  });
+
+  protected readonly account = signal<AccountInfo | null>(null);
+  protected readonly hasToken = signal(false);
+  protected readonly systemTimezone = signal('');
+  protected readonly timezones = signal<string[]>([]);
+  protected readonly busy = signal(false);
+  protected readonly tokenFeedback = signal<Feedback | null>(null);
+  protected readonly saveFeedback = signal<Feedback | null>(null);
+  protected readonly connectionText = computed(() => {
+    const account = this.account();
+    if (!account) {
+      return null;
+    }
+    return account.workspaceName ? `${account.name} · ${account.workspaceName}` : account.name;
+  });
+
+  /** Settings fields that the form does not edit are preserved from here. */
+  private loaded: Settings | null = null;
+
+  async ngOnInit(): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+    try {
+      const [view, timezones] = await Promise.all([
+        this.commands.getSettings(),
+        this.commands.listTimezones(),
+      ]);
+      this.timezones.set(timezones);
+      this.applyView(view);
+    } catch (err) {
+      this.saveFeedback.set({ kind: 'error', text: toAppError(err).message });
+    }
+  }
+
+  protected async saveToken(): Promise<void> {
+    const token = this.tokenControl.value.trim();
+    if (!token) {
+      return;
+    }
+    await this.run(this.tokenFeedback, async () => {
+      const account = await this.commands.setApiToken(token);
+      this.tokenControl.reset();
+      this.account.set(account);
+      this.hasToken.set(true);
+      return 'Token tallennettu Keychainiin.';
+    });
+  }
+
+  protected async testConnection(): Promise<void> {
+    await this.run(this.tokenFeedback, async () => {
+      const account = await this.commands.testConnection();
+      this.account.set(account);
+      return 'Yhteys toimii.';
+    });
+  }
+
+  protected async clearToken(): Promise<void> {
+    await this.run(this.tokenFeedback, async () => {
+      await this.commands.clearApiToken();
+      this.account.set(null);
+      this.hasToken.set(false);
+      return 'Token poistettu.';
+    });
+  }
+
+  protected async save(): Promise<void> {
+    if (this.form.invalid || !this.loaded) {
+      this.form.markAllAsTouched();
+      return;
+    }
+    const value = this.form.getRawValue();
+    const settings: Settings = {
+      ...this.loaded,
+      dailyTargets: value.dailyTargets.map((text) => parseMinutes(text) ?? 0),
+      timezone: value.useSystemTimezone ? null : value.timezone.trim() || null,
+      showSeconds: value.showSeconds,
+      autostart: value.autostart,
+      windowOpacity: value.windowOpacity,
+    };
+    await this.run(this.saveFeedback, async () => {
+      this.loaded = await this.commands.saveSettings(settings);
+      this.form.markAsPristine();
+      return 'Asetukset tallennettu.';
+    });
+  }
+
+  private applyView(view: SettingsView): void {
+    const { settings } = view;
+    this.loaded = settings;
+    this.account.set(view.account);
+    this.hasToken.set(view.hasToken);
+    this.systemTimezone.set(view.systemTimezone);
+    this.form.setValue({
+      dailyTargets: settings.dailyTargets.map(formatMinutes),
+      useSystemTimezone: settings.timezone === null,
+      timezone: settings.timezone ?? view.systemTimezone,
+      showSeconds: settings.showSeconds,
+      autostart: settings.autostart,
+      windowOpacity: settings.windowOpacity,
+    });
+  }
+
+  /** Runs an action with a busy flag and reports the outcome. */
+  private async run(
+    feedback: ReturnType<typeof signal<Feedback | null>>,
+    action: () => Promise<string>,
+  ): Promise<void> {
+    this.busy.set(true);
+    feedback.set(null);
+    try {
+      feedback.set({ kind: 'success', text: await action() });
+    } catch (err) {
+      feedback.set({ kind: 'error', text: toAppError(err).message });
+    } finally {
+      this.busy.set(false);
+    }
+  }
+}
