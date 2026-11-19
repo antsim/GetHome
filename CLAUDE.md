@@ -71,6 +71,14 @@ tray title. Commands that change Toggl state go to the engine loop through an
 Both windows load the same Angular app; `App` picks the view from the Tauri
 window label (`timer` / `settings`).
 
+**CSP gotcha:** Angular injects component styles as `<style>` tags at
+runtime. In bundled builds Tauri adds nonces to the CSP, which makes browsers
+ignore `'unsafe-inline'`, so `tauri.conf.json` keeps
+`dangerousDisableAssetCspModification: ["style-src"]`. Angular's critical CSS
+inlining is disabled in `angular.json` because it relies on an inline script.
+`npm run dev` does not show these problems; verify UI changes with
+`npx tauri build --debug --no-bundle` too.
+
 ## Conventions
 
 - **Rust**: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must
