@@ -1,0 +1,124 @@
+<main class="settings">
+  <h1>Asetukset</h1>
+
+  <section aria-labelledby="toggl-heading">
+    <h2 id="toggl-heading">Toggl</h2>
+    <p class="hint">
+      Toggl 2.0: <em>Settings → Toggl account → API key</em> (alkaa <code>toggl_sk_</code>).<br />
+      Toggl Track: profiilisivun <em>API Token</em>.<br />
+      Sovellus tunnistaa version avaimesta. Avain tallennetaan vain macOS:n avainnippuun (Keychain).
+    </p>
+
+    @if (hasToken()) {
+      <p class="connection">
+        <span class="dot" aria-hidden="true"></span>
+        Yhdistetty{{ connectionText() ? ': ' + connectionText() : '' }}
+      </p>
+    }
+
+    <form class="token-row" [formGroup]="tokenForm" (ngSubmit)="saveToken()">
+      <label class="visually-hidden" for="token">API-avain</label>
+      <input
+        id="token"
+        type="password"
+        autocomplete="off"
+        spellcheck="false"
+        [placeholder]="hasToken() ? 'Vaihda avain…' : 'Liitä API-avain'"
+        formControlName="token"
+      />
+      <button type="submit" [disabled]="busy() || !tokenForm.controls.token.value.trim()">
+        Tallenna
+      </button>
+    </form>
+
+    <div class="actions">
+      <button type="button" [disabled]="busy() || !hasToken()" (click)="testConnection()">
+        Testaa yhteys
+      </button>
+      <button
+        type="button"
+        class="danger"
+        [disabled]="busy() || !hasToken()"
+        (click)="clearToken()"
+      >
+        Poista avain
+      </button>
+    </div>
+
+    @if (tokenFeedback(); as feedback) {
+      <p class="feedback" [class.error]="feedback.kind === 'error'" role="status">
+        {{ feedback.text }}
+      </p>
+    }
+  </section>
+
+  <form [formGroup]="form" (ngSubmit)="save()">
+    <section aria-labelledby="targets-heading">
+      <h2 id="targets-heading">Päivän tavoite</h2>
+      <p class="hint">Muodossa h:mm, esim. 7:30. Arvo 0 tarkoittaa vapaapäivää.</p>
+      <div class="targets" formArrayName="dailyTargets">
+        @for (day of weekdays; track day; let i = $index) {
+          <label [for]="'target-' + i">{{ day }}</label>
+          <input
+            [id]="'target-' + i"
+            inputmode="decimal"
+            [formControlName]="i"
+            [class.invalid]="form.controls.dailyTargets.at(i).invalid"
+          />
+        }
+      </div>
+    </section>
+
+    <section aria-labelledby="tz-heading">
+      <h2 id="tz-heading">Aikavyöhyke</h2>
+      <label class="check">
+        <input type="checkbox" formControlName="useSystemTimezone" />
+        Käytä järjestelmän aikavyöhykettä{{ systemTimezone() ? ' (' + systemTimezone() + ')' : '' }}
+      </label>
+      @if (!form.controls.useSystemTimezone.value) {
+        <label class="visually-hidden" for="timezone">Aikavyöhyke</label>
+        <input id="timezone" list="timezones" formControlName="timezone" />
+        <datalist id="timezones">
+          @for (tz of timezones(); track tz) {
+            <option [value]="tz"></option>
+          }
+        </datalist>
+      }
+    </section>
+
+    <section aria-labelledby="display-heading">
+      <h2 id="display-heading">Näyttö</h2>
+      <label class="check">
+        <input type="checkbox" formControlName="showSeconds" />
+        Näytä sekunnit menu barissa
+      </label>
+      <label class="check">
+        <input type="checkbox" formControlName="autostart" />
+        Käynnistä kirjautuessa
+      </label>
+      <label class="range" for="opacity">
+        Ikkunan läpinäkyvyys
+        <span>{{ form.controls.windowOpacity.value }} %</span>
+      </label>
+      <input
+        id="opacity"
+        type="range"
+        step="5"
+        [min]="minOpacity"
+        [max]="maxOpacity"
+        formControlName="windowOpacity"
+      />
+    </section>
+
+    <div class="actions">
+      <button type="submit" class="primary" [disabled]="busy() || form.invalid">
+        Tallenna asetukset
+      </button>
+    </div>
+    @if (saveFeedback(); as feedback) {
+      <p class="feedback" [class.error]="feedback.kind === 'error'" role="status">
+        {{ feedback.text }}
+      </p>
+    }
+  </form>
+</main>

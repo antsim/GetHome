@@ -1,0 +1,41 @@
+// Global theme. Colors are RGB triplets so that components can apply alpha:
+// `rgb(var(--surface-rgb) / 0.8)`. Follows the macOS light/dark appearance.
+
+:root {
+  color-scheme: light dark;
+  --surface-rgb: 250 250 252;
+  --text-rgb: 28 28 30;
+  --muted-rgb: 110 110 118;
+  --border-rgb: 160 160 170;
+  --accent-rgb: 10 112 220;
+  --break-rgb: 200 110 0;
+  --overtime-rgb: 30 150 70;
+  --warning-rgb: 190 70 20;
+  --danger-rgb: 200 40 40;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-rgb: 30 30 32;
+    --text-rgb: 240 240 245;
+    --muted-rgb: 150 150 158;
+    --border-rgb: 90 90 98;
+    --accent-rgb: 80 160 255;
+    --break-rgb: 255 170 60;
+    --overtime-rgb: 90 210 120;
+    --warning-rgb: 255 150 90;
+    --danger-rgb: 255 110 110;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  // The timer window is transparent; the settings window sets its own background.
+  background: transparent;
+  overflow: hidden;
+}
