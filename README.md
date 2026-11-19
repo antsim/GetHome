@@ -2,7 +2,7 @@
 
 Henkilökohtainen macOS-sovellus, joka näyttää menu barissa ja pienessä
 kelluvassa ikkunassa, paljonko päivän työajasta on jäljellä. Tiedot haetaan
-[Toggl Trackista](https://toggl.com/track/). Kun Togglessa ei ole ajastinta
+[Togglista](https://toggl.com/) (Toggl 2.0 tai Toggl Track). Kun Togglessa ei ole ajastinta
 käynnissä, laskuri pysähtyy ja näytölle tulee teksti **"Tauolla"**.
 
 ```
@@ -20,7 +20,7 @@ käynnissä, laskuri pysähtyy ja näytölle tulee teksti **"Tauolla"**.
 - Valmistumisaika-arvio ("valmis klo 16:05") ja tauon kesto.
 - Vaalea ja tumma teema, säädettävä läpinäkyvyys, käynnistys kirjautuessa.
 - Toggl API -kutsuja normaalikäytössä alle 20 tunnissa. Rajoitukset, verkkokatkot ja uni käsitellään hallitusti.
-- API-token tallennetaan vain macOS:n avainnippuun (Keychain).
+- API-avain tallennetaan vain macOS:n avainnippuun (Keychain).
 
 ## Asennus ja käyttöönotto
 
@@ -48,14 +48,29 @@ Valmis paketti löytyy hakemistosta `src-tauri/target/release/bundle/`.
 Sovellus ei ole allekirjoitettu, joten ensimmäisellä käynnistyskerralla se
 avataan Finderissa hiiren oikealla painikkeella → *Avaa*.
 
-### API-tokenin asetus
+### API-avaimen asetus
 
-1. Kopioi API-token Toggl Trackin [profiilisivulta](https://track.toggl.com/profile) (kohta *API Token*).
-2. Avaa sovelluksen valikosta menu barissa *Asetukset…*.
-3. Liitä token ja paina *Tallenna*. Sovellus tarkistaa tokenin ja näyttää nimesi ja workspacen.
+Sovellus tukee sekä **Toggl 2.0:aa** (`focus.toggl.com`) että vanhempaa
+**Toggl Trackia** (`track.toggl.com`). Versio tunnistetaan avaimesta
+automaattisesti.
 
-Token tallennetaan vain avainnippuun. Sitä ei kirjoiteta tiedostoon eikä
+- **Toggl 2.0:** *Settings → Toggl account → API key*. Avain alkaa
+  `toggl_sk_` ja näytetään vain kerran. Uuden avaimen luominen mitätöi
+  vanhan.
+- **Toggl Track:** [profiilisivun](https://track.toggl.com/profile) kohta
+  *API Token*.
+
+1. Avaa sovelluksen valikosta menu barissa *Asetukset…*.
+2. Liitä avain ja paina *Tallenna*. Sovellus tarkistaa avaimen ja näyttää
+   yhdistetyn tilin ja workspacen.
+
+Avain tallennetaan vain avainnippuun. Sitä ei kirjoiteta tiedostoon eikä
 lähetetä mihinkään muualle kuin Toggl API:in.
+
+Toggl 2.0:ssa sovellus lukee yhden workspacen kirjaukset: sen, jonka Toggl
+antaa avaimelle oletukseksi (`users/me/landing-workspace`). Tauko-tyyppiset
+kirjaukset (*break*) ja pelkästään suunnitellut kirjaukset eivät kerrytä
+työaikaa.
 
 ## Käyttö
 
@@ -68,8 +83,8 @@ lähetetä mihinkään muualle kuin Toggl API:in.
 | Siirrä ikkunaa | Raahaa mistä tahansa kohdasta |
 
 Jos ajastin pysäytetään Toggl-sovelluksessa, muutos näkyy enintään neljän
-minuutin viiveellä. Tämä johtuu Toggl API:n pyyntörajoista (30 pyyntöä
-tunnissa). Tämän sovelluksen kautta tehdyt muutokset näkyvät heti.
+minuutin viiveellä. Tämä johtuu Toggl API:n pyyntörajoista (Free-tilillä 30
+pyyntöä tunnissa). Tämän sovelluksen kautta tehdyt muutokset näkyvät heti.
 
 ## Vianetsintä
 
@@ -127,9 +142,9 @@ CLAUDE.md         Arkkitehtuuri ja konventiot
 
 ## Tietosuoja
 
-- Sovellus keskustelee vain Toggl Trackin API:n kanssa (`api.track.toggl.com`).
-- API-token on vain macOS:n avainnipussa.
-- Asetukset (tavoitteet, näyttöasetukset sekä Toggl-tilin nimi ja workspace) tallennetaan sovelluksen datahakemistoon (`~/Library/Application Support/io.github.antsim.tyoaikalaskuri/`).
+- Sovellus keskustelee vain Toggl API:n kanssa (`focus.toggl.com` tai `api.track.toggl.com`).
+- API-avain on vain macOS:n avainnipussa.
+- Asetukset (tavoitteet, näyttöasetukset sekä Toggl-tilin tiedot ja workspace) tallennetaan sovelluksen datahakemistoon (`~/Library/Application Support/io.github.antsim.tyoaikalaskuri/`).
 
 ## Lisenssi
 

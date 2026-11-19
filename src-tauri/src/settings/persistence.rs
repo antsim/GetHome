@@ -7,7 +7,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use tauri::{AppHandle, Wry};
 use tauri_plugin_store::{Store, StoreExt};
 
-use super::{AccountInfo, Settings};
+use super::Settings;
+use crate::toggl::Account;
 
 const STORE_FILE: &str = "settings.json";
 const SETTINGS_KEY: &str = "settings";
@@ -43,11 +44,11 @@ impl SettingsRepository {
         self.put(SETTINGS_KEY, settings)
     }
 
-    pub fn load_account(&self) -> Option<AccountInfo> {
+    pub fn load_account(&self) -> Option<Account> {
         self.get(ACCOUNT_KEY)
     }
 
-    pub fn save_account(&self, account: Option<&AccountInfo>) -> Result<(), PersistenceError> {
+    pub fn save_account(&self, account: Option<&Account>) -> Result<(), PersistenceError> {
         match account {
             Some(account) => self.put(ACCOUNT_KEY, account),
             None => {

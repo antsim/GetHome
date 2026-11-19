@@ -4,8 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
 use super::calendar::DayBounds;
-use crate::toggl::models::CREATED_WITH;
-use crate::toggl::{NewTimeEntry, TimeEntry};
+use crate::toggl::{EntryTags, StartEntry, TimeEntry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TimerStatus {
@@ -35,7 +34,7 @@ pub struct EntryTemplate {
     pub project_id: Option<i64>,
     pub task_id: Option<i64>,
     pub description: Option<String>,
-    pub tags: Option<Vec<String>>,
+    pub tags: EntryTags,
     pub billable: bool,
 }
 
@@ -47,7 +46,7 @@ impl EntryTemplate {
             project_id: None,
             task_id: None,
             description: None,
-            tags: None,
+            tags: EntryTags::None,
             billable: false,
         }
     }
@@ -58,17 +57,15 @@ impl EntryTemplate {
     }
 
     /// A request that starts a running entry at `start`.
-    pub fn to_new_entry(&self, start: DateTime<Utc>) -> NewTimeEntry {
-        NewTimeEntry {
-            created_with: CREATED_WITH,
+    pub fn to_start_entry(&self, start: DateTime<Utc>) -> StartEntry {
+        StartEntry {
             workspace_id: self.workspace_id,
-            description: self.description.clone(),
             project_id: self.project_id,
             task_id: self.task_id,
+            description: self.description.clone(),
             tags: self.tags.clone(),
             billable: self.billable,
             start,
-            duration: -1,
         }
     }
 }
@@ -208,8 +205,7 @@ pub(crate) mod tests {
             description: Some(format!("entry {id}")),
             start,
             stop,
-            duration: stop.map_or(-1, |s| (s - start).num_seconds()),
-            tags: None,
+            tags: EntryTags::None,
             billable: false,
         }
     }

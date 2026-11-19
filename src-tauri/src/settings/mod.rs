@@ -123,26 +123,6 @@ pub fn system_time_zone() -> Tz {
         .unwrap_or(FALLBACK_TIME_ZONE)
 }
 
-/// Non-secret details of the connected Toggl account, cached in the store so
-/// that `/me` is called only when the token changes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountInfo {
-    pub name: String,
-    pub workspace_name: Option<String>,
-    pub default_workspace_id: i64,
-}
-
-impl From<&crate::toggl::Me> for AccountInfo {
-    fn from(me: &crate::toggl::Me) -> Self {
-        Self {
-            name: me.fullname.clone(),
-            workspace_name: me.default_workspace_name().map(str::to_owned),
-            default_workspace_id: me.default_workspace_id,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

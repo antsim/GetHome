@@ -6,7 +6,8 @@ use tauri::{AppHandle, State};
 use crate::engine::{RefreshOutcome, TimerViewModel};
 use crate::error::AppError;
 use crate::service::{AppService, SettingsView};
-use crate::settings::{AccountInfo, Settings};
+use crate::settings::Settings;
+use crate::toggl::Account;
 use crate::windows;
 
 type CommandResult<T> = Result<T, AppError>;
@@ -55,7 +56,7 @@ pub fn save_settings(
 pub async fn set_api_token(
     service: State<'_, AppService>,
     token: String,
-) -> CommandResult<AccountInfo> {
+) -> CommandResult<Account> {
     service.set_api_token(token).await
 }
 
@@ -65,7 +66,7 @@ pub fn clear_api_token(service: State<'_, AppService>) -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub async fn test_connection(service: State<'_, AppService>) -> CommandResult<AccountInfo> {
+pub async fn test_connection(service: State<'_, AppService>) -> CommandResult<Account> {
     service.test_connection().await
 }
 

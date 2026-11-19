@@ -35,10 +35,18 @@ export interface Settings {
   timerWindowVisible: boolean;
 }
 
+/** Which Toggl product the API token belongs to (detected from the token). */
+export type TogglFlavor = 'track' | 'focus';
+
+/** `toggl/models.rs` → `Account`. */
 export interface AccountInfo {
-  name: string;
+  flavor: TogglFlavor;
+  /** Not available for Toggl 2.0. */
+  name: string | null;
+  workspaceId: number;
   workspaceName: string | null;
-  defaultWorkspaceId: number;
+  /** Toggl 2.0 only. */
+  organizationId: number | null;
 }
 
 export interface SettingsView {

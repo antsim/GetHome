@@ -3,7 +3,7 @@
 use super::*;
 use crate::clock::testing::ManualClock;
 use crate::engine::state::tests::entry;
-use crate::toggl::TimeEntry;
+use crate::toggl::{track, TimeEntry};
 use chrono::TimeZone;
 use chrono_tz::Europe::Helsinki;
 use wiremock::matchers::{method, path};
@@ -26,8 +26,7 @@ impl Harness {
             .unwrap()
             .with_timezone(&Utc);
         let clock = Arc::new(ManualClock::new(start));
-        let client = TogglClient::new(server.uri(), clock.clone()).expect("client");
-        client.set_token(Some("token".into()));
+        let client = crate::toggl::client::testing::client(&server, "token", clock.clone());
         let engine = SyncEngine::new(
             Arc::new(client),
             clock.clone(),
@@ -77,8 +76,15 @@ impl Harness {
     }
 }
 
+/// A 200 response with entries in Toggl Track wire format.
 fn json_entries(entries: &[TimeEntry]) -> ResponseTemplate {
-    ResponseTemplate::new(200).set_body_json(entries)
+    let body: Vec<_> = entries.iter().map(track::to_json).collect();
+    ResponseTemplate::new(200).set_body_json(body)
+}
+
+/// A 200 response with one entry in Toggl Track wire format.
+fn json_entry(entry: &TimeEntry) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(track::to_json(entry))
 }
 
 /// A running entry started at 08:00 local on the test day.
@@ -116,12 +122,7 @@ async fn first_tick_fetches_today_and_publishes_state() {
 async fn request_budget_stays_below_limit_in_normal_use() {
     let mut h = Harness::new().await;
     mount(&h.server, ENTRIES, json_entries(&[running_entry(1)])).await;
-    mount(
-        &h.server,
-        CURRENT,
-        ResponseTemplate::new(200).set_body_json(running_entry(1)),
-    )
-    .await;
+    mount(&h.server, CURRENT, json_entry(&running_entry(1))).await;
 
     h.engine.tick().await;
     h.run_for(Duration::hours(1)).await;
@@ -136,12 +137,7 @@ async fn changed_running_entry_triggers_full_sync() {
     let mut h = Harness::new().await;
     mount(&h.server, ENTRIES, json_entries(&[running_entry(1)])).await;
     // Toggl now reports a different running entry.
-    mount(
-        &h.server,
-        CURRENT,
-        ResponseTemplate::new(200).set_body_json(running_entry(2)),
-    )
-    .await;
+    mount(&h.server, CURRENT, json_entry(&running_entry(2))).await;
 
     h.engine.tick().await;
     h.run_for(Duration::minutes(4)).await;
@@ -313,11 +309,7 @@ async fn stop_timer_updates_state_optimistically_and_verifies() {
     mount(&h.server, ENTRIES, json_entries(&[running_entry(7)])).await;
     Mock::given(method("PATCH"))
         .and(path("/workspaces/1/time_entries/7/stop"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(entry(
-            7,
-            running_entry(7).start,
-            Some(h.now()),
-        )))
+        .respond_with(json_entry(&entry(7, running_entry(7).start, Some(h.now()))))
         .expect(1)
         .mount(&h.server)
         .await;
@@ -377,7 +369,7 @@ async fn resume_continues_latest_entry_from_earlier_days() {
             "duration": -1,
             "created_with": "tyoaikalaskuri",
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(entry(4, h.now(), None)))
+        .respond_with(json_entry(&entry(4, h.now(), None)))
         .expect(1)
         .mount(&h.server)
         .await;
@@ -390,4 +382,65 @@ async fn resume_continues_latest_entry_from_earlier_days() {
         h.engine.resume_timer().await,
         Err(ControlError::AlreadyRunning)
     ));
+}
+
+#[tokio::test]
+async fn adopts_running_entry_that_started_before_fetched_range() {
+    let mut h = Harness::new().await;
+    mount(&h.server, ENTRIES, json_entries(&[])).await;
+    // A timer left running for three days is not in today's list.
+    let old = entry(5, h.now() - Duration::days(3), None);
+    mount(&h.server, CURRENT, json_entry(&old)).await;
+
+    h.engine.tick().await;
+    h.run_for(Duration::minutes(8)).await;
+
+    // One full sync after the first poll, none after the second.
+    assert_eq!(h.requests_to(CURRENT).await, 2);
+    assert_eq!(h.requests_to(ENTRIES).await, 2);
+    let running = h.snapshot().day.and_then(|d| d.running).expect("running");
+    assert_eq!(running.id, Some(5));
+}
+
+#[tokio::test]
+async fn syncs_with_toggl_2_api_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me/landing-workspace"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "organization_id": 10, "workspace_id": 20, "reason": "default"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let start = Helsinki
+        .with_ymd_and_hms(2026, 1, 5, 8, 0, 0)
+        .unwrap()
+        .with_timezone(&Utc);
+    Mock::given(method("GET"))
+        .and(path("/organizations/10/workspaces/20/time-entries/stream"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "workspace_id": 20, "start": start, "duration": 3600, "type": "activity"},
+            {"id": 2, "workspace_id": 20, "start": start + Duration::hours(1),
+             "duration": 900, "type": "break"},
+            {"id": 3, "workspace_id": 20, "start": start + Duration::minutes(75),
+             "type": "activity"}
+        ])))
+        .mount(&server)
+        .await;
+
+    let clock = Arc::new(ManualClock::new(start + Duration::hours(2)));
+    let client = crate::toggl::client::testing::client(&server, "toggl_sk_test", clock.clone());
+    let mut engine = SyncEngine::new(
+        Arc::new(client),
+        clock,
+        PollConfig::default(),
+        Helsinki,
+        None,
+    );
+    engine.tick().await;
+
+    let day = engine.subscribe().borrow().day.clone().expect("day");
+    assert_eq!(day.completed_secs, 3600, "the break does not count");
+    assert_eq!(day.running.and_then(|r| r.id), Some(3));
 }

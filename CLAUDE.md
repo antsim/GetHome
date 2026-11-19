@@ -1,7 +1,9 @@
 # CLAUDE.md
 
 Työaikalaskuri: a personal macOS menu bar app (Tauri 2 + Rust + Angular) that
-shows how much of today's working time is left, based on Toggl Track.
+shows how much of today's working time is left, based on Toggl. Both Toggl
+2.0 (`focus.toggl.com`) and Toggl Track (API v9) are supported; the API is
+chosen from the token (`toggl_sk_…` = Toggl 2.0).
 
 **[PLAN.md](PLAN.md) is the source of truth** for requirements, API usage,
 the request budget and the implementation phases. Read it before making
@@ -44,8 +46,11 @@ src-tauri/src/
     compute.rs        PURE: (DayState, now, tz, targets) → TimerViewModel
     scheduler.rs      SyncEngine: polling, backoff, wake/day change, stop/resume
   toggl/
-    client.rs         The only place that talks HTTP to Toggl
-    models.rs         Serde models
+    client.rs         The only place that talks HTTP to Toggl: auth, rate
+                      budget, error mapping, flavor dispatch (Track / 2.0)
+    track.rs          Toggl Track API v9 endpoints + wire format
+    focus.rs          Toggl 2.0 endpoints + wire format (org/workspace scoped)
+    models.rs         Product-independent domain models used by the engine
     rate_budget.rs    Sliding 1 h request counter
   settings/
     mod.rs            Settings model + validation
@@ -72,8 +77,11 @@ window label (`timer` / `settings`).
   be clean. Errors use `thiserror`. No `unwrap()`/`expect()` in production
   code (tests are fine). Recover poisoned mutexes with
   `unwrap_or_else(|e| e.into_inner())`.
-- **Toggl**: every HTTP call goes through `toggl/client.rs` so it is recorded
-  in the rate budget. Normal use must stay ≤ 20 requests/hour (there is a test
+- **Toggl**: every HTTP call goes through `TogglClient::send` so it is
+  recorded in the rate budget. Product-specific wire formats stay in
+  `track.rs` / `focus.rs`; the engine only sees `toggl/models.rs`.
+  Toggl 2.0 API docs: https://engineering.toggl.com/docs/focus/ (OpenAPI
+  spec linked there). Normal use must stay ≤ 20 requests/hour (there is a test
   for this in `engine/scheduler/tests.rs`).
 - **Pure logic**: `compute.rs`, `calendar.rs` and `state.rs` do no I/O and
   never read the clock; `now` is a parameter. `SyncEngine` gets time from an
@@ -95,8 +103,9 @@ data directory, outside the repository. Tests use fake tokens against
 
 ## Adding features
 
-- New Toggl endpoint: add a method to `TogglClient` (+ wiremock test), call it
-  from `SyncEngine` or `AppService`, never from elsewhere.
+- New Toggl endpoint: add a public method to `TogglClient` that dispatches to
+  `track_*` / `focus_*` implementations (+ wiremock tests for both), and call
+  it from `SyncEngine` or `AppService`, never from elsewhere.
 - New setting: add the field to `Settings` (with a default, `#[serde(default)]`
   keeps old files loading), validate in `Settings::validate`, mirror it in
   `models.ts` and the settings form.

@@ -1,23 +1,48 @@
-//! HTTP client for the Toggl Track API v9.
-//!
-//! Authentication is HTTP Basic with the API token as the user name and the
-//! literal string `api_token` as the password. All requests are recorded in a
-//! shared [`RateBudget`].
+//! HTTP client for Toggl: authentication, rate budget, error mapping and the
+//! product-independent public API. The product-specific endpoints live in
+//! [`super::track`] and [`super::focus`].
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use reqwest::{Method, RequestBuilder, Response, StatusCode, Url};
+use reqwest::{Method, Response, StatusCode, Url};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
-use super::models::{Me, NewTimeEntry, TimeEntry};
+use super::focus::FocusContext;
+use super::models::{Account, StartEntry, TimeEntry};
 use super::rate_budget::RateBudget;
 use crate::clock::Clock;
 
-pub const DEFAULT_BASE_URL: &str = "https://api.track.toggl.com/api/v9";
+pub const TRACK_BASE_URL: &str = "https://api.track.toggl.com/api/v9";
+pub const FOCUS_BASE_URL: &str = "https://focus.toggl.com/api";
 const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(15);
 const USER_AGENT: &str = concat!("tyoaikalaskuri/", env!("CARGO_PKG_VERSION"));
+/// Toggl 2.0 API keys start with this prefix.
+const FOCUS_KEY_PREFIX: &str = "toggl_sk_";
+const MAX_ERROR_DETAIL: usize = 200;
+
+/// Which Toggl product (and API) a token belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Flavor {
+    /// Toggl Track, API v9.
+    #[default]
+    Track,
+    /// Toggl 2.0 (`focus.toggl.com`).
+    Focus,
+}
+
+impl Flavor {
+    pub fn detect(token: &str) -> Self {
+        if token.starts_with(FOCUS_KEY_PREFIX) {
+            Self::Focus
+        } else {
+            Self::Track
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum TogglError {
@@ -31,12 +56,14 @@ pub enum TogglError {
     RateLimited,
     #[error("network error: {0}")]
     Network(#[source] reqwest::Error),
-    #[error("unexpected HTTP status {0}")]
-    Status(u16),
+    #[error("unexpected HTTP status {status}: {}", detail.as_deref().unwrap_or("-"))]
+    Status { status: u16, detail: Option<String> },
     #[error("invalid response from Toggl: {0}")]
     Decode(#[source] reqwest::Error),
     #[error("invalid request URL: {0}")]
     Url(#[from] url::ParseError),
+    #[error("the Toggl account has no accessible workspace")]
+    NoWorkspace,
 }
 
 impl TogglError {
@@ -48,17 +75,46 @@ impl TogglError {
 
 pub type Result<T> = std::result::Result<T, TogglError>;
 
+/// A token together with the API it belongs to.
+#[derive(Clone)]
+pub(super) struct Credentials {
+    pub token: String,
+    pub flavor: Flavor,
+}
+
+impl Credentials {
+    pub fn new(token: &str) -> Self {
+        Self {
+            token: token.to_owned(),
+            flavor: Flavor::detect(token),
+        }
+    }
+}
+
 /// Thread-safe Toggl API client. Cheap to share behind an `Arc`.
 pub struct TogglClient {
     http: reqwest::Client,
-    base_url: String,
-    token: RwLock<Option<String>>,
+    track_base: String,
+    focus_base: String,
+    credentials: RwLock<Option<Credentials>>,
+    /// Toggl 2.0 organization and workspace, resolved once per token.
+    pub(super) focus_context: Mutex<Option<FocusContext>>,
     budget: Mutex<RateBudget>,
-    clock: Arc<dyn Clock>,
+    pub(super) clock: Arc<dyn Clock>,
 }
 
 impl TogglClient {
-    pub fn new(base_url: impl Into<String>, clock: Arc<dyn Clock>) -> Result<Self> {
+    /// A client for the production Toggl APIs.
+    pub fn new(clock: Arc<dyn Clock>) -> Result<Self> {
+        Self::with_base_urls(TRACK_BASE_URL, FOCUS_BASE_URL, clock)
+    }
+
+    /// A client with custom base URLs (used by tests).
+    pub fn with_base_urls(
+        track_base: impl Into<String>,
+        focus_base: impl Into<String>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .user_agent(USER_AGENT)
@@ -66,8 +122,10 @@ impl TogglClient {
             .map_err(TogglError::Network)?;
         Ok(Self {
             http,
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
-            token: RwLock::new(None),
+            track_base: track_base.into().trim_end_matches('/').to_owned(),
+            focus_base: focus_base.into().trim_end_matches('/').to_owned(),
+            credentials: RwLock::new(None),
+            focus_context: Mutex::new(None),
             budget: Mutex::new(RateBudget::default()),
             clock,
         })
@@ -75,11 +133,13 @@ impl TogglClient {
 
     /// Replaces the API token used for subsequent requests.
     pub fn set_token(&self, token: Option<String>) {
-        *self.token.write().unwrap_or_else(|e| e.into_inner()) = token;
+        *self.credentials.write().unwrap_or_else(|e| e.into_inner()) =
+            token.as_deref().map(Credentials::new);
+        *self.focus_context.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     pub fn has_token(&self) -> bool {
-        self.token
+        self.credentials
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .is_some()
@@ -94,82 +154,108 @@ impl TogglClient {
             .count(now)
     }
 
-    /// `GET /me` with workspace data, using the stored token.
-    pub async fn me(&self) -> Result<Me> {
-        let token = self.current_token()?;
-        self.get_me(&token).await
+    /// Validates `token` and returns the account it belongs to. Used before
+    /// a new token is stored.
+    pub async fn verify_token(&self, token: &str) -> Result<Account> {
+        let credentials = Credentials::new(token);
+        match credentials.flavor {
+            Flavor::Track => self.track_account(&credentials).await,
+            Flavor::Focus => self.focus_account(&credentials).await,
+        }
     }
 
-    /// `GET /me` with an explicit token. Used to validate a token before it
-    /// is stored.
-    pub async fn verify_token(&self, token: &str) -> Result<Me> {
-        self.get_me(token).await
+    /// The account of the stored token.
+    pub async fn account(&self) -> Result<Account> {
+        self.verify_token(&self.credentials()?.token).await
     }
 
-    /// Time entries whose start time is within `[start, end)`.
+    /// Time entries overlapping `[start, end)`. Toggl Track filters by start
+    /// time, so callers should start the range early enough to include
+    /// entries that cross into it.
     pub async fn time_entries(
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<TimeEntry>> {
-        let url = self.url_with_query(
-            "/me/time_entries",
-            &[("start_date", rfc3339(start)), ("end_date", rfc3339(end))],
-        )?;
-        self.json(Method::GET, url, None::<&()>).await
+        let credentials = self.credentials()?;
+        match credentials.flavor {
+            Flavor::Track => self.track_time_entries(&credentials, start, end).await,
+            Flavor::Focus => self.focus_time_entries(&credentials, start, end).await,
+        }
     }
 
-    /// Most recent time entries without a date filter (Toggl returns roughly
-    /// the latest couple of weeks).
+    /// The most recent entries (roughly the last two weeks).
     pub async fn recent_time_entries(&self) -> Result<Vec<TimeEntry>> {
-        let url = self.url("/me/time_entries")?;
-        self.json(Method::GET, url, None::<&()>).await
+        let credentials = self.credentials()?;
+        match credentials.flavor {
+            Flavor::Track => self.track_recent_time_entries(&credentials).await,
+            Flavor::Focus => self.focus_recent_time_entries(&credentials).await,
+        }
     }
 
-    /// The running time entry, or `None` if no timer is running.
+    /// The running work entry, or `None` if no timer is running.
     pub async fn current_time_entry(&self) -> Result<Option<TimeEntry>> {
-        let url = self.url("/me/time_entries/current")?;
-        self.json(Method::GET, url, None::<&()>).await
+        let credentials = self.credentials()?;
+        match credentials.flavor {
+            Flavor::Track => self.track_current_time_entry(&credentials).await,
+            Flavor::Focus => self.focus_current_time_entry(&credentials).await,
+        }
     }
 
-    /// Starts a new time entry.
-    pub async fn start_time_entry(&self, entry: &NewTimeEntry) -> Result<TimeEntry> {
-        let url = self.url(&format!("/workspaces/{}/time_entries", entry.workspace_id))?;
-        self.json(Method::POST, url, Some(entry)).await
+    /// Starts a running time entry.
+    pub async fn start_time_entry(&self, entry: &StartEntry) -> Result<TimeEntry> {
+        let credentials = self.credentials()?;
+        match credentials.flavor {
+            Flavor::Track => self.track_start(&credentials, entry).await,
+            Flavor::Focus => self.focus_start(&credentials, entry).await,
+        }
     }
 
-    /// Stops a running time entry.
-    pub async fn stop_time_entry(&self, workspace_id: i64, entry_id: i64) -> Result<TimeEntry> {
-        let url = self.url(&format!(
-            "/workspaces/{workspace_id}/time_entries/{entry_id}/stop"
-        ))?;
-        self.json(Method::PATCH, url, None::<&()>).await
+    /// Stops the running entry. Succeeds if the timer was already stopped.
+    pub async fn stop_time_entry(&self, workspace_id: i64, entry_id: i64) -> Result<()> {
+        let credentials = self.credentials()?;
+        match credentials.flavor {
+            Flavor::Track => self.track_stop(&credentials, workspace_id, entry_id).await,
+            Flavor::Focus => self.focus_stop(&credentials).await,
+        }
     }
 
-    async fn get_me(&self, token: &str) -> Result<Me> {
-        let url = self.url_with_query("/me", &[("with_related_data", "true".to_owned())])?;
-        let request = self.http.get(url).basic_auth(token, Some("api_token"));
-        decode(self.send(request).await?).await
+    // --- HTTP core, shared by `track` and `focus` -------------------------
+
+    fn credentials(&self) -> Result<Credentials> {
+        self.credentials
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or(TogglError::MissingToken)
     }
 
-    async fn json<B, T>(&self, method: Method, url: Url, body: Option<&B>) -> Result<T>
-    where
-        B: serde::Serialize + ?Sized,
-        T: DeserializeOwned,
-    {
-        let token = self.current_token()?;
-        let mut request = self
-            .http
-            .request(method, url)
-            .basic_auth(token, Some("api_token"));
+    pub(super) fn url(&self, flavor: Flavor, path: &str, query: &[(&str, String)]) -> Result<Url> {
+        let base = match flavor {
+            Flavor::Track => &self.track_base,
+            Flavor::Focus => &self.focus_base,
+        };
+        Ok(Url::parse_with_params(&format!("{base}{path}"), query)?)
+    }
+
+    /// Sends a request, records it in the rate budget and maps error
+    /// statuses. Successful responses (including 204) are returned as is.
+    pub(super) async fn send<B: Serialize + ?Sized>(
+        &self,
+        credentials: &Credentials,
+        method: Method,
+        url: Url,
+        body: Option<&B>,
+    ) -> Result<Response> {
+        let mut request = self.http.request(method, url);
+        request = match credentials.flavor {
+            Flavor::Track => request.basic_auth(&credentials.token, Some("api_token")),
+            Flavor::Focus => request.bearer_auth(&credentials.token),
+        };
         if let Some(body) = body {
             request = request.json(body);
         }
-        decode(self.send(request).await?).await
-    }
 
-    /// Sends a request, records it in the rate budget and maps error statuses.
-    async fn send(&self, request: RequestBuilder) -> Result<Response> {
         self.budget
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -181,87 +267,84 @@ impl TogglClient {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(TogglError::Unauthorized),
             StatusCode::PAYMENT_REQUIRED => Err(TogglError::QuotaExceeded),
             StatusCode::TOO_MANY_REQUESTS => Err(TogglError::RateLimited),
-            status => Err(TogglError::Status(status.as_u16())),
+            status => Err(TogglError::Status {
+                status: status.as_u16(),
+                detail: error_detail(response).await,
+            }),
         }
     }
 
-    fn current_token(&self) -> Result<String> {
-        self.token
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .ok_or(TogglError::MissingToken)
-    }
-
-    fn url(&self, path: &str) -> Result<Url> {
-        Ok(Url::parse(&format!("{}{path}", self.base_url))?)
-    }
-
-    fn url_with_query(&self, path: &str, query: &[(&str, String)]) -> Result<Url> {
-        Ok(Url::parse_with_params(
-            &format!("{}{path}", self.base_url),
-            query,
-        )?)
+    /// Sends a request and decodes a JSON body.
+    pub(super) async fn json<B, T>(
+        &self,
+        credentials: &Credentials,
+        method: Method,
+        url: Url,
+        body: Option<&B>,
+    ) -> Result<T>
+    where
+        B: Serialize + ?Sized,
+        T: DeserializeOwned,
+    {
+        let response = self.send(credentials, method, url, body).await?;
+        response.json::<T>().await.map_err(TogglError::Decode)
     }
 }
 
-async fn decode<T: DeserializeOwned>(response: Response) -> Result<T> {
-    response.json::<T>().await.map_err(TogglError::Decode)
+/// Extracts a short error message from an error response body. Toggl 2.0
+/// returns `{ "error_description": ... }`, Toggl Track plain text.
+async fn error_detail(response: Response) -> Option<String> {
+    #[derive(Deserialize)]
+    struct ErrorBody {
+        error_description: Option<String>,
+        error: Option<String>,
+    }
+    let text = response.text().await.ok()?;
+    let detail = serde_json::from_str::<ErrorBody>(&text)
+        .ok()
+        .and_then(|body| body.error_description.or(body.error))
+        .unwrap_or(text);
+    let detail = detail.trim().trim_matches('"');
+    (!detail.is_empty()).then(|| detail.chars().take(MAX_ERROR_DETAIL).collect())
 }
 
-fn rfc3339(time: DateTime<Utc>) -> String {
+pub(super) fn rfc3339(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
     use super::*;
     use crate::clock::SystemClock;
-    use wiremock::matchers::{basic_auth, method, path, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::MockServer;
 
-    async fn client_for(server: &MockServer) -> TogglClient {
-        let client = TogglClient::new(server.uri(), Arc::new(SystemClock)).expect("client");
-        client.set_token(Some("secret-token".into()));
+    /// A client whose both APIs point at `server`, with `token` set.
+    pub(crate) fn client(server: &MockServer, token: &str, clock: Arc<dyn Clock>) -> TogglClient {
+        let client =
+            TogglClient::with_base_urls(server.uri(), server.uri(), clock).expect("client");
+        client.set_token(Some(token.to_owned()));
         client
     }
 
-    #[tokio::test]
-    async fn sends_basic_auth_and_parses_current_entry() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/me/time_entries/current"))
-            .and(basic_auth("secret-token", "api_token"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("null"))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let client = client_for(&server).await;
-        assert_eq!(client.current_time_entry().await.expect("ok"), None);
-        assert_eq!(client.requests_in_last_hour(), 1);
+    pub(crate) fn system_clock() -> Arc<dyn Clock> {
+        Arc::new(SystemClock)
     }
+}
 
-    #[tokio::test]
-    async fn passes_date_range_as_rfc3339() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/me/time_entries"))
-            .and(query_param("start_date", "2026-03-01T22:00:00Z"))
-            .and(query_param("end_date", "2026-03-02T22:00:00Z"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
-            .expect(1)
-            .mount(&server)
-            .await;
+#[cfg(test)]
+mod tests {
+    use super::testing::{client, system_clock};
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let client = client_for(&server).await;
-        let start = "2026-03-01T22:00:00Z".parse().expect("date");
-        let end = "2026-03-02T22:00:00Z".parse().expect("date");
-        assert!(client
-            .time_entries(start, end)
-            .await
-            .expect("ok")
-            .is_empty());
+    #[test]
+    fn detects_flavor_from_token() {
+        assert_eq!(Flavor::detect("toggl_sk_abc"), Flavor::Focus);
+        assert_eq!(
+            Flavor::detect("1971800d4d82861d8f2c1651fea4d212"),
+            Flavor::Track
+        );
     }
 
     #[tokio::test]
@@ -273,23 +356,56 @@ mod tests {
             ),
             (402, |e| matches!(e, TogglError::QuotaExceeded)),
             (429, |e| matches!(e, TogglError::RateLimited)),
-            (500, |e| matches!(e, TogglError::Status(500))),
+            (500, |e| matches!(e, TogglError::Status { status: 500, .. })),
         ] {
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .respond_with(ResponseTemplate::new(status))
                 .mount(&server)
                 .await;
-            let client = client_for(&server).await;
+            let client = client(&server, "token", system_clock());
             let err = client.current_time_entry().await.expect_err("should fail");
             assert!(check(&err), "status {status} mapped to {err:?}");
         }
     }
 
     #[tokio::test]
+    async fn includes_error_description_from_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/organizations/1/workspaces/2/tracking/start"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+                "error": "required_fields_missing",
+                "error_description": "Project is required"
+            })))
+            .mount(&server)
+            .await;
+        let client = client(&server, "toggl_sk_test", system_clock());
+        *client.focus_context.lock().expect("lock") = Some(FocusContext {
+            organization_id: 1,
+            workspace_id: 2,
+        });
+        let entry = StartEntry {
+            workspace_id: 2,
+            project_id: None,
+            task_id: None,
+            description: None,
+            tags: Default::default(),
+            billable: false,
+            start: Utc::now(),
+        };
+        let err = client.start_time_entry(&entry).await.expect_err("422");
+        assert!(
+            matches!(&err, TogglError::Status { status: 422, detail: Some(d) } if d == "Project is required"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn fails_fast_without_token() {
         let server = MockServer::start().await;
-        let client = TogglClient::new(server.uri(), Arc::new(SystemClock)).expect("client");
+        let client = TogglClient::with_base_urls(server.uri(), server.uri(), system_clock())
+            .expect("client");
         let err = client.current_time_entry().await.expect_err("no token");
         assert!(matches!(err, TogglError::MissingToken));
         assert_eq!(client.requests_in_last_hour(), 0);

@@ -14,7 +14,7 @@ use serde::Serialize;
 use tokio::sync::watch;
 
 use super::calendar::{local_date, DayBounds};
-use super::state::{DayState, EntryTemplate, SyncStatus, SyncWarning};
+use super::state::{DayState, EntryTemplate, RunningEntry, SyncStatus, SyncWarning};
 use crate::clock::Clock;
 use crate::toggl::{TogglClient, TogglError};
 
@@ -270,7 +270,7 @@ impl SyncEngine {
 
         let result = self
             .client
-            .start_time_entry(&template.to_new_entry(now))
+            .start_time_entry(&template.to_start_entry(now))
             .await;
         match self.track(result, now) {
             Ok(entry) => {
@@ -347,9 +347,26 @@ impl SyncEngine {
             .as_ref()
             .and_then(|d| d.running.as_ref())
             .and_then(|r| r.id);
-        if current.map(|e| e.id) != known_id {
-            log::info!("running entry changed in Toggl; fetching today's entries");
-            self.full_sync(now).await;
+        if current.as_ref().map(|e| e.id) == known_id {
+            return;
+        }
+        log::info!("running entry changed in Toggl; fetching today's entries");
+        if !self.full_sync(now).await {
+            return;
+        }
+        // An entry that started before the fetched range (e.g. a timer left
+        // running for days) is not in the list; adopt it from `current` so
+        // that the next poll does not trigger yet another full sync.
+        if let (Some(entry), Some(day)) = (current, self.day.as_mut()) {
+            if day.running.is_none() {
+                day.running = Some(RunningEntry {
+                    id: Some(entry.id),
+                    workspace_id: entry.workspace_id,
+                    start: entry.start,
+                });
+                day.has_entries = true;
+                self.publish();
+            }
         }
     }
 
@@ -364,8 +381,8 @@ impl SyncEngine {
         let workspace_id = match self.default_workspace_id {
             Some(id) => id,
             None => {
-                let me = self.client.me().await;
-                let id = self.track(me, now)?.default_workspace_id;
+                let account = self.client.account().await;
+                let id = self.track(account, now)?.workspace_id;
                 self.default_workspace_id = Some(id);
                 id
             }

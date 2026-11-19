@@ -40,6 +40,19 @@ interface Feedback {
   text: string;
 }
 
+const PRODUCT_NAMES: Record<AccountInfo['flavor'], string> = {
+  track: 'Toggl Track',
+  focus: 'Toggl 2.0',
+};
+
+/** E.g. `Toggl 2.0 · workspace 21925` or `Toggl Track · Matti · Oma`. */
+export function describeAccount(account: AccountInfo): string {
+  const workspace = account.workspaceName ?? `workspace ${account.workspaceId}`;
+  return [PRODUCT_NAMES[account.flavor], account.name, workspace]
+    .filter((part): part is string => !!part)
+    .join(' · ');
+}
+
 function durationValidator(control: AbstractControl<string>): ValidationErrors | null {
   return parseMinutes(control.value) === null ? { duration: true } : null;
 }
@@ -83,10 +96,7 @@ export class SettingsWindow implements OnInit {
   protected readonly saveFeedback = signal<Feedback | null>(null);
   protected readonly connectionText = computed(() => {
     const account = this.account();
-    if (!account) {
-      return null;
-    }
-    return account.workspaceName ? `${account.name} · ${account.workspaceName}` : account.name;
+    return account ? describeAccount(account) : null;
   });
 
   /** Settings fields that the form does not edit are preserved from here. */
@@ -118,7 +128,7 @@ export class SettingsWindow implements OnInit {
       this.tokenForm.reset();
       this.account.set(account);
       this.hasToken.set(true);
-      return 'Token tallennettu Keychainiin.';
+      return 'Avain tallennettu Keychainiin.';
     });
   }
 
@@ -135,7 +145,7 @@ export class SettingsWindow implements OnInit {
       await this.commands.clearApiToken();
       this.account.set(null);
       this.hasToken.set(false);
-      return 'Token poistettu.';
+      return 'Avain poistettu.';
     });
   }
 

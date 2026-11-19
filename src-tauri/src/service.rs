@@ -27,9 +27,8 @@ use crate::engine::{
 use crate::error::AppError;
 use crate::settings::persistence::SettingsRepository;
 use crate::settings::secrets::{KeychainStore, SecretStore};
-use crate::settings::{system_time_zone, AccountInfo, Settings};
-use crate::toggl::client::DEFAULT_BASE_URL;
-use crate::toggl::{TogglClient, TogglError};
+use crate::settings::{system_time_zone, Settings};
+use crate::toggl::{Account, TogglClient, TogglError};
 use crate::{tray, windows};
 
 /// Event carrying a [`TimerViewModel`], emitted every second.
@@ -55,7 +54,7 @@ enum EngineCommand {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
     pub settings: Settings,
-    pub account: Option<AccountInfo>,
+    pub account: Option<Account>,
     pub has_token: bool,
     pub system_timezone: String,
 }
@@ -82,7 +81,7 @@ impl AppService {
             Box::new(KeychainStore::new(app.config().identifier.clone()));
 
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-        let client = Arc::new(TogglClient::new(DEFAULT_BASE_URL, clock.clone())?);
+        let client = Arc::new(TogglClient::new(clock.clone())?);
         match secrets.load_token() {
             Ok(token) => client.set_token(token),
             Err(err) => log::error!("could not read API token: {err}"),
@@ -93,7 +92,7 @@ impl AppService {
             clock.clone(),
             PollConfig::default(),
             settings.time_zone(),
-            account.map(|a| a.default_workspace_id),
+            account.map(|a| a.workspace_id),
         );
         let snapshot = engine.subscribe();
         let (settings_tx, settings_rx) = watch::channel(settings);
@@ -186,20 +185,17 @@ impl AppService {
         }
     }
 
-    /// Validates the token with `/me`, then stores it in the Keychain.
-    pub async fn set_api_token(&self, token: String) -> Result<AccountInfo, AppError> {
+    /// Validates the token against Toggl, then stores it in the Keychain.
+    pub async fn set_api_token(&self, token: String) -> Result<Account, AppError> {
         let token = token.trim().to_owned();
         if token.is_empty() {
             return Err(AppError::EmptyToken);
         }
-        let me = self.client.verify_token(&token).await?;
-        let account = AccountInfo::from(&me);
+        let account = self.client.verify_token(&token).await?;
         self.secrets.save_token(&token)?;
         self.repository.save_account(Some(&account))?;
         self.client.set_token(Some(token));
-        self.send(EngineCommand::TokenChanged(Some(
-            account.default_workspace_id,
-        )));
+        self.send(EngineCommand::TokenChanged(Some(account.workspace_id)));
         Ok(account)
     }
 
@@ -212,9 +208,9 @@ impl AppService {
         Ok(())
     }
 
-    /// Calls `/me` with the stored token and refreshes the cached account.
-    pub async fn test_connection(&self) -> Result<AccountInfo, AppError> {
-        let account = AccountInfo::from(&self.client.me().await?);
+    /// Checks the stored token against Toggl and refreshes the cached account.
+    pub async fn test_connection(&self) -> Result<Account, AppError> {
+        let account = self.client.account().await?;
         self.repository.save_account(Some(&account))?;
         Ok(account)
     }

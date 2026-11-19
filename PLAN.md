@@ -301,3 +301,24 @@ Suunnitelmaa tarkennettiin toteutuksen aikana seuraavasti.
 - Kelluvan ikkunan näkyvyys tallennetaan omiin asetuksiin (`timerWindowVisible`). `window-state` tallentaa vain sijainnin ja koon.
 - Pysäytyksen ja käynnistyksen jälkeen tehdään tarkistushaku seuraavalla sekuntitikillä.
 - Uusia komentoja: `clear_api_token`, `test_connection`, `open_settings` ja `list_timezones`.
+
+**Toggl 2.0 -tuki** (lisätty käyttöönoton jälkeen)
+
+Toggl 2.0 (`focus.toggl.com`) on eri tuote kuin Toggl Track, ja sillä on oma API. Track API hylkää sen avaimet. Molempia tuetaan, ja versio tunnistetaan avaimesta: `toggl_sk_…` on Toggl 2.0, muut ovat Track-tokeneita. Dokumentaatio: https://engineering.toggl.com/docs/focus/
+
+| Tarkoitus | Toggl 2.0 -kutsu |
+|---|---|
+| Avaimen tarkistus, organisaatio ja workspace | `GET /users/me/landing-workspace` (välimuistiin kerran per avain) |
+| Päivän kirjaukset | `GET /organizations/{org}/workspaces/{ws}/time-entries/stream?date_from&date_to&include_taskless=true` (yksi pyyntö, ei sivutusta) |
+| Käynnissä oleva ajastin | `GET …/tracking/current` (204 = ei ajastinta) |
+| Käynnistys | `POST …/tracking/start` (`type: "activity"`) |
+| Pysäytys | `POST …/tracking/stop` (404 = jo pysäytetty) |
+| Viimeisin kirjaus jatkamista varten | `GET …/time-entries?order_by=-start&per_page=20` |
+
+- Autentikointi: `Authorization: Bearer toggl_sk_…`.
+- Kiintiö on per käyttäjä per organisaatio: Free 30/h, Starter 240/h, Premium 600/h. Ylitys palauttaa HTTP 402:n. Pyyntöbudjetti ja pollausstrategia pysyvät ennallaan.
+- Kirjauksilla ei ole `stop`-kenttää. Loppu on `start + duration`, ja käynnissä olevalta puuttuu `duration`.
+- Työajaksi ei lasketa tauko-tyyppisiä (`type: break`), pelkästään suunniteltuja (ei `start`ia) eikä poistettuja kirjauksia. Käynnissä oleva tauko tarkoittaa tilaa *Tauolla*.
+- Toggl 2.0 ei kerro käyttäjän nimeä, joten asetuksissa näytetään tuote ja workspace.
+- Sovellus lukee yhden workspacen eli sen, jonka `landing-workspace` palauttaa.
+- Yleinen korjaus: jos ajastin on käynnistetty ennen haettua aikaväliä, `current`-kirjaus otetaan tilaan suoraan, jotta seuraava pollaus ei käynnistä uutta täyttä hakua.
