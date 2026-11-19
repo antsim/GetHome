@@ -15,7 +15,7 @@
       </p>
     }
 
-    <form class="token-row" (ngSubmit)="saveToken()">
+    <form class="token-row" [formGroup]="tokenForm" (ngSubmit)="saveToken()">
       <label class="visually-hidden" for="token">API-token</label>
       <input
         id="token"
@@ -23,9 +23,11 @@
         autocomplete="off"
         spellcheck="false"
         [placeholder]="hasToken() ? 'Vaihda token…' : 'Liitä API-token'"
-        [formControl]="tokenControl"
+        formControlName="token"
       />
-      <button type="submit" [disabled]="busy() || !tokenControl.value.trim()">Tallenna</button>
+      <button type="submit" [disabled]="busy() || !tokenForm.controls.token.value.trim()">
+        Tallenna
+      </button>
     </form>
 
     <div class="actions">

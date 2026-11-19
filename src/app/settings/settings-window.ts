@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import {
   AbstractControl,
-  FormControl,
   NonNullableFormBuilder,
   ReactiveFormsModule,
   ValidationErrors,
@@ -61,7 +60,9 @@ export class SettingsWindow implements OnInit {
   protected readonly minOpacity = MIN_OPACITY;
   protected readonly maxOpacity = MAX_OPACITY;
 
-  protected readonly tokenControl = new FormControl('', { nonNullable: true });
+  // Each <form> needs its own [formGroup]; without the directive, (ngSubmit)
+  // never fires and the browser's native submit reloads the page.
+  protected readonly tokenForm = this.fb.group({ token: this.fb.control('') });
   protected readonly form = this.fb.group({
     dailyTargets: this.fb.array(
       WEEKDAYS.map(() => this.fb.control('7:30', [Validators.required, durationValidator])),
@@ -108,13 +109,13 @@ export class SettingsWindow implements OnInit {
   }
 
   protected async saveToken(): Promise<void> {
-    const token = this.tokenControl.value.trim();
+    const token = this.tokenForm.controls.token.value.trim();
     if (!token) {
       return;
     }
     await this.run(this.tokenFeedback, async () => {
       const account = await this.commands.setApiToken(token);
-      this.tokenControl.reset();
+      this.tokenForm.reset();
       this.account.set(account);
       this.hasToken.set(true);
       return 'Token tallennettu Keychainiin.';
