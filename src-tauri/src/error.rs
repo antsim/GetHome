@@ -56,15 +56,13 @@ impl AppError {
             Self::Toggl(err) | Self::Control(ControlError::Toggl(err)) => toggl_message(err),
             Self::Control(ControlError::NotRunning) => "Ajastin ei ole käynnissä.".into(),
             Self::Control(ControlError::AlreadyRunning) => "Ajastin on jo käynnissä.".into(),
-            Self::Settings(SettingsError::InvalidTarget) => {
+            Self::Settings(SettingsError::Target) => {
                 "Päivän tavoitteen on oltava 0–24 tuntia.".into()
             }
-            Self::Settings(SettingsError::InvalidTimeZone(name)) => {
+            Self::Settings(SettingsError::TimeZone(name)) => {
                 format!("Tuntematon aikavyöhyke: {name}")
             }
-            Self::Settings(SettingsError::InvalidOpacity) => {
-                "Läpinäkyvyyden on oltava 60–100 %.".into()
-            }
+            Self::Settings(SettingsError::Opacity) => "Läpinäkyvyyden on oltava 60–100 %.".into(),
             Self::Persistence(_) => "Asetusten tallennus epäonnistui.".into(),
             Self::Secret(_) => "Avainnippuun (Keychain) ei päästy käsiksi.".into(),
             Self::Autostart(_) => "Automaattisen käynnistyksen asetus epäonnistui.".into(),

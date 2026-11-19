@@ -70,7 +70,7 @@
       <h2 id="tz-heading">Aikavyöhyke</h2>
       <label class="check">
         <input type="checkbox" formControlName="useSystemTimezone" />
-        Käytä järjestelmän aikavyöhykettä ({{ systemTimezone() }})
+        Käytä järjestelmän aikavyöhykettä{{ systemTimezone() ? ' (' + systemTimezone() + ')' : '' }}
       </label>
       @if (!form.controls.useSystemTimezone.value) {
         <label class="visually-hidden" for="timezone">Aikavyöhyke</label>

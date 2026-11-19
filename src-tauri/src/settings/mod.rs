@@ -66,24 +66,24 @@ impl Default for Settings {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SettingsError {
     #[error("daily target must be between 0 and 24 hours")]
-    InvalidTarget,
+    Target,
     #[error("unknown time zone: {0}")]
-    InvalidTimeZone(String),
+    TimeZone(String),
     #[error("opacity must be between {MIN_OPACITY} and {MAX_OPACITY} percent")]
-    InvalidOpacity,
+    Opacity,
 }
 
 impl Settings {
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.daily_targets.0.iter().any(|m| *m > MAX_TARGET_MINUTES) {
-            return Err(SettingsError::InvalidTarget);
+            return Err(SettingsError::Target);
         }
         if let Some(name) = &self.timezone {
             name.parse::<Tz>()
-                .map_err(|_| SettingsError::InvalidTimeZone(name.clone()))?;
+                .map_err(|_| SettingsError::TimeZone(name.clone()))?;
         }
         if !(MIN_OPACITY..=MAX_OPACITY).contains(&self.window_opacity) {
-            return Err(SettingsError::InvalidOpacity);
+            return Err(SettingsError::Opacity);
         }
         Ok(())
     }
@@ -166,15 +166,12 @@ mod tests {
             timezone: Some("Mars/Base".into()),
             ..Settings::default()
         };
-        assert!(matches!(
-            bad_tz.validate(),
-            Err(SettingsError::InvalidTimeZone(_))
-        ));
+        assert!(matches!(bad_tz.validate(), Err(SettingsError::TimeZone(_))));
         let bad_opacity = Settings {
             window_opacity: 10,
             ..Settings::default()
         };
-        assert_eq!(bad_opacity.validate(), Err(SettingsError::InvalidOpacity));
+        assert_eq!(bad_opacity.validate(), Err(SettingsError::Opacity));
     }
 
     #[test]

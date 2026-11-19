@@ -8,4 +8,4 @@ pub mod models;
 pub mod rate_budget;
 
 pub use client::{TogglClient, TogglError};
-pub use models::{Me, NewTimeEntry, TimeEntry, Workspace};
+pub use models::{Me, NewTimeEntry, TimeEntry};
